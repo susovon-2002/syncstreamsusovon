@@ -9,8 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { LogOut, AlertCircle, CheckCircle2, HelpCircle } from 'lucide-react';
-import { doc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { LogOut, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { doc, collection, addDoc, deleteDoc, updateDoc, deleteField } from 'firebase/firestore';
 import { useFirebase } from '@/firebase';
 import { setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 
@@ -63,9 +63,16 @@ export function LeaveMeetingModal({
           reason: finalReason.trim() || 'No reason specified',
         }).catch(() => {});
 
-        // 2. Set camera off & leave status in presence
+        // 2. Mark presence as left and delete document from roomUsers collection
         const presenceRef = doc(firestore, 'rooms', roomId, 'roomUsers', user.uid);
-        setDocumentNonBlocking(presenceRef, { isCameraOn: false, isHandRaised: false }, { merge: true });
+        await updateDoc(presenceRef, { isLeft: true, isOnline: false, isCameraOn: false }).catch(() => {});
+        await deleteDoc(presenceRef).catch(() => {});
+
+        // 3. Remove user from room members map
+        const roomRef = doc(firestore, 'rooms', roomId);
+        await updateDoc(roomRef, {
+          [`members.${user.uid}`]: deleteField(),
+        }).catch(() => {});
       }
     } catch (e) {
       console.warn('Error recording leave log:', e);

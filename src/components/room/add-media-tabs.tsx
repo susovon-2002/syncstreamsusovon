@@ -39,17 +39,38 @@ export function AddMediaTabs({ onUrlSelect }: AddMediaTabsProps) {
     }
   };
 
+  const [isUploading, setIsUploading] = useState(false);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selected = e.target.files[0];
+      // Firestore maximum doc size is 1MB. Warn user if file exceeds 800KB.
+      if (selected.size > 800 * 1024) {
+        alert("⚠️ Local video file is too large to sync directly via Firestore. Please use the 'Share Screen' tab to stream this video file to all participants in real time!");
+        setFile(null);
+        e.target.value = '';
+        return;
+      }
+      setFile(selected);
     }
   };
 
   const handleFileUpload = (e: React.FormEvent) => {
     e.preventDefault();
     if (file) {
-      const fileUrl = URL.createObjectURL(file);
-      onUrlSelect(fileUrl, file.name, 'file');
+      setIsUploading(true);
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Url = reader.result as string;
+        onUrlSelect(base64Url, file.name, 'file');
+        setIsUploading(false);
+      };
+      reader.onerror = () => {
+        const fileUrl = URL.createObjectURL(file);
+        onUrlSelect(fileUrl, file.name, 'file');
+        setIsUploading(false);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -175,11 +196,11 @@ export function AddMediaTabs({ onUrlSelect }: AddMediaTabsProps) {
                 </div>
                 <Button 
                   type="submit" 
-                  disabled={!file} 
-                  className="w-full bg-gradient-to-r from-[#ff9933] via-[#ffaa44] to-[#138808] hover:opacity-95 text-slate-950 font-extrabold text-sm h-12 rounded-xl shadow-xl shadow-[#ff9933]/25 transition-all flex items-center justify-center gap-2 tracking-wide disabled:opacity-40 hover:scale-[1.01]"
+                  disabled={!file || isUploading}
+                  className="w-full bg-gradient-to-r from-[#ff9933] via-[#ffaa44] to-[#138808] hover:opacity-95 text-slate-950 font-extrabold text-sm h-12 rounded-xl shadow-xl shadow-[#ff9933]/25 transition-all flex items-center justify-center gap-2 tracking-wide hover:scale-[1.01] disabled:opacity-50"
                 >
                   <Play className="h-4 w-4 fill-slate-950" />
-                  <span>Upload and Play</span>
+                  <span>{isUploading ? 'Syncing Video with Room...' : 'Play Uploaded Video'}</span>
                 </Button>
               </form>
             </CardContent>

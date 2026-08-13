@@ -17,7 +17,7 @@ import { Separator } from '../ui/separator';
 import { useFirebase } from '@/firebase';
 import { useCollection, useDoc } from '@/firebase';
 import { addDocumentNonBlocking, updateDocumentNonBlocking, setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
-import { collection, query, orderBy, limit, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { useMemoFirebase } from '@/firebase/provider';
 import {
   DropdownMenu,
@@ -497,6 +497,17 @@ export function ChatPanel({ roomId }: { roomId: string }) {
     });
   };
 
+  const handleRemoveParticipant = async (targetUid: string) => {
+    if (!firestore || !roomId || !isHost) return;
+    const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', targetUid);
+    await deleteDoc(userRef).catch(() => {});
+    if (roomRef) {
+      await updateDoc(roomRef, {
+        [`members.${targetUid}`]: deleteField(),
+      }).catch(() => {});
+    }
+  };
+
   const handleVoiceNoteRecorded = (audioBlob: Blob, durationSeconds: number) => {
     if (!user || !firestore) return;
     const reader = new FileReader();
@@ -678,7 +689,13 @@ export function ChatPanel({ roomId }: { roomId: string }) {
       </CardHeader>
       
       <div className="flex items-center gap-3 p-2 px-4 overflow-x-auto border-t border-white/10 bg-slate-950/40">
-        {!loadingParticipants && participants?.map((p) => {
+        {!loadingParticipants && participants?.filter(p => {
+          const pId = p.uid || p.id;
+          if (!pId) return false;
+          if (p.isLeft === true || p.isOnline === false) return false;
+          if (room?.members && !(pId in room.members) && pId !== room.hostId) return false;
+          return true;
+        }).map((p) => {
           const pId = p.uid || p.id;
           const isCurrent = (user ? (pId === user.uid || p.uid === user.uid || p.id === user.uid) : false);
           const nameToDisplay = isCurrent ? 'You' : getUsername(pId, p);
@@ -709,13 +726,18 @@ export function ChatPanel({ roomId }: { roomId: string }) {
                     )}
                   </div>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="bg-slate-900 border-slate-700 text-white">
+                <DropdownMenuContent className="bg-slate-900 border-slate-700 text-white text-xs">
                   <DropdownMenuItem onClick={() => handleMakeHost(pId)} className="hover:bg-slate-800 cursor-pointer">
                     Make Host
                   </DropdownMenuItem>
                   {p.isHandRaised && (
                     <DropdownMenuItem onClick={() => handleLowerHand(pId)} className="hover:bg-slate-800 cursor-pointer text-[#FF9933]">
                       Lower Hand 🖐️
+                    </DropdownMenuItem>
+                  )}
+                  {isHost && !isCurrent && (
+                    <DropdownMenuItem onClick={() => handleRemoveParticipant(pId)} className="hover:bg-red-500/10 cursor-pointer text-red-400">
+                      Remove from Room ❌
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuContent>
