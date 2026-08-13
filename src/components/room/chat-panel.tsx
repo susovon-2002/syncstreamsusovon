@@ -33,6 +33,7 @@ import { DJSoundboard } from './dj-soundboard';
 import { VoiceNoteRecorder } from './voice-note-recorder';
 import { RoomThemeSelector } from './room-theme-selector';
 import { CollaborativeWhiteboard } from './collaborative-whiteboard';
+import { LeaveLogsViewer } from './leave-logs-viewer';
 import {
   Dialog,
   DialogContent,
@@ -433,9 +434,14 @@ export function ChatPanel({ roomId }: { roomId: string }) {
   };
 
   const handleDeleteForEveryone = async (msgId: string) => {
-    if (!firestore) return;
+    if (!firestore || !roomId) return;
     const msgRef = doc(firestore, 'rooms', roomId, 'messages', msgId);
-    await updateDoc(msgRef, { deletedForAll: true, message: '', attachments: [] }).catch(() => {});
+    setDocumentNonBlocking(msgRef, {
+      deletedForAll: true,
+      message: '',
+      attachments: [],
+      attachment: null,
+    }, { merge: true });
   };
 
   const handleMarkViewOnce = async (msgId: string) => {
@@ -726,11 +732,12 @@ export function ChatPanel({ roomId }: { roomId: string }) {
         <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF9933] mb-1.5 flex items-center gap-1.5">
           <Sparkles className="h-3 w-3 text-[#FF9933]" /> Room Quick Tools
         </div>
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="grid grid-cols-3 gap-1.5 mb-1.5">
           <DJSoundboard />
           <CollaborativeWhiteboard roomId={roomId} />
+          <LeaveLogsViewer roomId={roomId} isHost={isHost} roomRef={roomRef} requireLeaveReason={room?.requireLeaveReason} />
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-1.5">
           <RoomThemeSelector />
           <AttendanceExporter participants={participants || []} roomName={room?.name} hostId={room?.hostId} />
         </div>
@@ -1171,10 +1178,10 @@ export function ChatPanel({ roomId }: { roomId: string }) {
                               <Trash2 className="h-3.5 w-3.5 text-slate-400" />
                               Delete for Me
                             </DropdownMenuItem>
-                            {isCurrentUser && (
+                            {(isCurrentUser || isHost) && (
                               <DropdownMenuItem
                                 onClick={() => handleDeleteForEveryone(msg.id)}
-                                className="gap-2 py-2 px-3 cursor-pointer hover:bg-red-500/10 rounded-lg text-red-400"
+                                className="gap-2 py-2 px-3 cursor-pointer hover:bg-red-500/10 rounded-lg text-red-400 font-semibold"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                                 Delete for Everyone

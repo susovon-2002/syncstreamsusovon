@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { JoinRequestPanel } from '@/components/room/join-request-panel';
 import { ReactionAura } from '@/components/room/reaction-aura';
+import { LeaveMeetingModal } from '@/components/room/leave-meeting-modal';
+import { LogOut } from 'lucide-react';
 
 // ── Waiting Room Screen ─────────────────────────────────────────────────────
 function WaitingRoom({
@@ -141,6 +143,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const { id } = use(params);
   const { firestore, user, isUserLoading } = useFirebase();
   const isAuthenticated = !!user && !user.isAnonymous;
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
 
   const roomRef = useMemoFirebase(
     () => (firestore && id) ? doc(firestore, 'rooms', id) : null,
@@ -315,6 +318,17 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             </div>
           </div>
           <RoomIdDisplay roomId={id} roomName={room?.name} isHost={isHost} roomRef={roomRef} />
+          
+          {/* Leave Meeting Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLeaveModalOpen(true)}
+            className="h-8 px-3 text-xs border-red-500/40 text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:text-red-300 font-extrabold gap-1.5 shadow"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Leave Room</span>
+          </Button>
         </div>
       </Header>
 
@@ -351,6 +365,15 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
       {/* 3D Spatial Reaction Aura & Floating Bursts */}
       <ReactionAura roomId={id} />
+
+      {/* Leave Meeting Modal */}
+      <LeaveMeetingModal
+        open={leaveModalOpen}
+        onOpenChange={setLeaveModalOpen}
+        roomId={id}
+        roomName={room?.name}
+        isMandatory={!!room?.requireLeaveReason}
+      />
     </div>
   );
 }
