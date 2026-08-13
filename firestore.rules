@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isRoomMember(roomId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
+        && request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.members;
+    }
+
+    function isRoomHost(roomId) {
+      return isRoomMember(roomId)
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
+    }
+
+    function isJoiningSelf() {
+      return signedIn()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['members'])
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.members[request.auth.uid] == 'participant';
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list: if false;
+      allow create, update: if signedIn() && request.auth.uid == userId;
+      allow delete: if false;
+
+      match /savedDocuments/{docId} {
+        allow read, list: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn() && request.auth.uid == userId;
+        allow delete: if signedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /rooms/{roomId} {
+      allow create: if signedIn()
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.members[request.auth.uid] == 'host';
+      allow get: if signedIn();
+      allow list: if false;
+      allow update: if (isRoomMember(roomId) || isJoiningSelf())
+        && request.resource.data.hostId == resource.data.hostId;
+      allow delete: if isRoomHost(roomId);
+
+      match /joinRequests/{requesterId} {
+        // Anyone authenticated can create their own join request
+        allow create: if signedIn() && request.auth.uid == requesterId;
+        // Requester can read their own request; host can read all requests
+        allow read, list: if signedIn() && (request.auth.uid == requesterId || isRoomHost(roomId));
+        // Only the host can update (approve/deny) requests
+        allow update: if isRoomHost(roomId);
+        allow delete: if false;
+      }
+
+
+      match /roomUsers/{userId} {
+        allow read: if isRoomMember(roomId);
+        allow create, update: if isRoomMember(roomId) && request.auth.uid == userId;
+        allow delete: if isRoomMember(roomId) && request.auth.uid == userId;
+      }
+
+      match /chatMessages/{messageId} {
+        allow read: if isRoomMember(roomId);
+        allow create: if isRoomMember(roomId)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.message is string
+          && request.resource.data.message.size() <= 5000;
+        allow update, delete: if false;
+      }
+
+      match /screenSignals/{signalId} {
+        allow read: if isRoomMember(roomId);
+        allow create, update, delete: if isRoomMember(roomId)
+          && (request.auth.uid == signalId || isRoomHost(roomId));
+      }
+
+      match /roomUsers/{targetUserId}/signals/{signalId} {
+        allow read: if isRoomMember(roomId) && (request.auth.uid == targetUserId || request.auth.uid == signalId);
+        allow create, update, delete: if isRoomMember(roomId)
+          && (request.auth.uid == targetUserId || request.auth.uid == signalId);
+      }
+    }
+  }
+}

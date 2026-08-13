@@ -1,0 +1,290 @@
+{
+  "entities": {
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user of the SyncStream platform.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the user."
+        },
+        "username": {
+          "type": "string",
+          "description": "The user's chosen username."
+        },
+        "email": {
+          "type": "string",
+          "description": "The user's email address.",
+          "format": "email"
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "email"
+      ]
+    },
+    "Room": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Room",
+      "type": "object",
+      "description": "Represents a room where users can watch or listen together.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the room."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the room."
+        },
+        "hostId": {
+          "type": "string",
+          "description": "Reference to the User who is the host of the room. (Relationship: User 1:N Room)"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "hostId"
+      ]
+    },
+    "RoomUser": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "RoomUser",
+      "type": "object",
+      "description": "Connects Users to Rooms, tracking presence in the application. (Many-to-many relationship between User and Room).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the user's presence in the room."
+        },
+        "roomId": {
+          "type": "string",
+          "description": "Reference to the Room. (Relationship: Room 1:N RoomUser)"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the User. (Relationship: User 1:N RoomUser)"
+        },
+        "joinedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the user joined the room.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "roomId",
+        "userId",
+        "joinedAt"
+      ]
+    },
+    "Media": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Media",
+      "type": "object",
+      "description": "Represents a media file (video or audio) being shared in a room.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the media."
+        },
+        "title": {
+          "type": "string",
+          "description": "The title of the media."
+        },
+        "url": {
+          "type": "string",
+          "description": "The URL where the media is hosted.",
+          "format": "uri"
+        },
+        "uploadDate": {
+          "type": "string",
+          "description": "The date the media was uploaded",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "description": "the type of media it is, for example it could be 'mp4', 'mp3', 'mkv'."
+        },
+        "roomId": {
+          "type": "string",
+          "description": "Reference to the Room in which the media is being shared. (Relationship: Room 1:N Media)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the media."
+        },
+        "thumbnailUrl": {
+          "type": "string",
+          "description": "A URL to a thumbnail for the media",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "url",
+        "roomId",
+        "uploadDate",
+        "type",
+        "description",
+        "thumbnailUrl"
+      ]
+    },
+    "ChatMessage": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ChatMessage",
+      "type": "object",
+      "description": "Represents a chat message sent within a room. It can contain text, and optionally, media.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the chat message."
+        },
+        "roomId": {
+          "type": "string",
+          "description": "Reference to the Room where the message was sent. (Relationship: Room 1:N ChatMessage)"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the User who sent the message. (Relationship: User 1:N ChatMessage)"
+        },
+        "message": {
+          "type": "string",
+          "description": "The content of the chat message."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp indicating when the message was sent.",
+          "format": "date-time"
+        },
+        "mediaUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the uploaded image or video. This is optional."
+        },
+        "mediaType": {
+            "type": "string",
+            "enum": ["image", "video"],
+            "description": "Type of the media, if any. This is optional."
+        }
+      },
+      "required": [
+        "id",
+        "roomId",
+        "userId",
+        "message",
+        "timestamp"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous",
+      "google.com"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores user profiles. Uses path-based ownership for private user data.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/rooms/{roomId}",
+        "definition": {
+          "entityName": "Room",
+          "schema": {
+            "$ref": "#/backend/entities/Room"
+          },
+          "description": "Stores room information, including the host ID and a denormalized 'members' map for authorization independence.",
+          "params": [
+            {
+              "name": "roomId",
+              "description": "The unique identifier of the room."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/rooms/{roomId}/roomUsers/{roomUserId}",
+        "definition": {
+          "entityName": "RoomUser",
+          "schema": {
+            "$ref": "#/backend/entities/RoomUser"
+          },
+          "description": "Tracks user presence in rooms.",
+          "params": [
+            {
+              "name": "roomId",
+              "description": "The unique identifier of the room."
+            },
+            {
+              "name": "roomUserId",
+              "description": "The unique identifier of the room user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/rooms/{roomId}/media/{mediaId}",
+        "definition": {
+          "entityName": "Media",
+          "schema": {
+            "$ref": "#/backend/entities/Media"
+          },
+          "description": "Stores media files associated with a room. Access is controlled by the 'members' map denormalized in the parent room document.",
+          "params": [
+            {
+              "name": "roomId",
+              "description": "The unique identifier of the room."
+            },
+            {
+              "name": "mediaId",
+              "description": "The unique identifier of the media."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/rooms/{roomId}/chatMessages/{chatMessageId}",
+        "definition": {
+          "entityName": "ChatMessage",
+          "schema": {
+            "$ref": "#/backend/entities/ChatMessage"
+          },
+          "description": "Stores chat messages for a room. Access is controlled by the 'members' map denormalized in the parent room document.",
+          "params": [
+            {
+              "name": "roomId",
+              "description": "The unique identifier of the room."
+            },
+            {
+              "name": "chatMessageId",
+              "description": "The unique identifier of the chat message."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore structure is designed to support SyncStream's real-time collaborative media viewing. It prioritizes authorization independence and clear security rules, crucial for collaborative applications.\n\nUsers are stored in a standard `/users/{userId}` collection. Rooms are also top-level collections, enabling easy listing. The `RoomUser` entity is used for tracking room participation and presence.  Media and ChatMessages are stored as subcollections of rooms to scope the data.\n\n**Authorization Independence:**\n*   `rooms`:  Authorization is managed through the `hostId` property within each room.  A user can only modify or delete a room where they are the host.\n*   `rooms/{roomId}/media`: Access to media is determined by membership in the room. Security rules will validate if `request.auth.uid` exists as a member in the `members` map denormalized inside the room document before creating or modifying media.\n*   `rooms/{roomId}/chatMessages`: Similar to media, access to chat messages is controlled by room membership.\n\n**QAPs (Rules are not Filters):**\n*   The segregation of data into `/users` and `/rooms` collections allows for simple `list` operations based on ownership or membership.\n\n**Denormalization Strategy:**\n*   The `rooms` collection does not contain `members` subcollections but will have an attribute `members` of type map in each document. This ensures that when we need to query, modify, or delete objects in the `/rooms/{roomId}/media` collection we are not required to make a `get()` call to the parent to check the access.\n*   When a user creates a room, their `uid` will be added to the `members` map."
+  }
+}
+    

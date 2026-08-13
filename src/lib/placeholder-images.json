@@ -1,0 +1,10 @@
+{
+  "placeholderImages": [
+    {
+      "id": "video-placeholder",
+      "description": "Abstract neon lights representing a video stream.",
+      "imageUrl": "https://images.unsplash.com/photo-1702357430179-16b1ba1f5dd0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw3fHxhYnN0cmFjdCUyMG5lb258ZW58MHx8fHwxNzYzMTIwOTU0fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "abstract neon"
+    }
+  ]
+}
