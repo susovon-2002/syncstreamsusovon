@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Card } from '../ui/card';
-import { Camera, Mic, MicOff, Video, VideoOff, RefreshCw } from 'lucide-react';
+import { Camera, Mic, MicOff, Video, VideoOff, RefreshCw, GripVertical, Maximize2, Minimize2, Move, MoveDiagonal } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
@@ -260,8 +260,165 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
     }
   };
 
+  // ── Drag & Resize State ──────────────────────────────────────────────────
+  const [isFloating, setIsFloating] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 20, y: 80 });
+  const [cardScale, setCardScale] = useState<'sm' | 'md' | 'lg' | 'xl'>('md');
+  const [customSize, setCustomSize] = useState<{ w: number; h: number } | null>(null);
+
+  const isDraggingRef = useRef(false);
+  const isResizingRef = useRef(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const resizeStartRef = useRef<{ w: number; h: number; x: number; y: number }>({ w: 320, h: 180, x: 0, y: 0 });
+
+  // Size preset lookup
+  const SIZE_PRESETS = {
+    sm: { w: 220, h: 130 },
+    md: { w: 320, h: 185 },
+    lg: { w: 460, h: 260 },
+    xl: { w: 620, h: 350 },
+  };
+
+  const currentW = customSize?.w || SIZE_PRESETS[cardScale].w;
+  const currentH = customSize?.h || SIZE_PRESETS[cardScale].h;
+
+  const handleStartDrag = (clientX: number, clientY: number) => {
+    if (!isFloating) return;
+    isDraggingRef.current = true;
+    dragStartRef.current = {
+      x: clientX - pos.x,
+      y: clientY - pos.y,
+    };
+  };
+
+  const handleStartResize = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    isResizingRef.current = true;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    resizeStartRef.current = {
+      w: currentW,
+      h: currentH,
+      x: clientX,
+      y: clientY,
+    };
+  };
+
+  useEffect(() => {
+    const handleMove = (clientX: number, clientY: number) => {
+      if (isDraggingRef.current) {
+        const newX = Math.max(10, Math.min(window.innerWidth - currentW - 10, clientX - dragStartRef.current.x));
+        const newY = Math.max(10, Math.min(window.innerHeight - currentH - 10, clientY - dragStartRef.current.y));
+        setPos({ x: newX, y: newY });
+      } else if (isResizingRef.current) {
+        const deltaX = clientX - resizeStartRef.current.x;
+        const deltaY = clientY - resizeStartRef.current.y;
+        const newW = Math.max(180, Math.min(800, resizeStartRef.current.w + deltaX));
+        const newH = Math.max(110, Math.min(500, resizeStartRef.current.h + deltaY));
+        setCustomSize({ w: newW, h: newH });
+      }
+    };
+
+    const handleEnd = () => {
+      isDraggingRef.current = false;
+      isResizingRef.current = false;
+    };
+
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) handleMove(e.touches[0].clientX, e.touches[0].clientY);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', onTouchMove);
+    window.addEventListener('touchend', handleEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [currentW, currentH]);
+
+  const cycleScale = () => {
+    setCustomSize(null);
+    if (cardScale === 'sm') setCardScale('md');
+    else if (cardScale === 'md') setCardScale('lg');
+    else if (cardScale === 'lg') setCardScale('xl');
+    else setCardScale('sm');
+  };
+
+  const mainCardStyle = isFloating
+    ? {
+        position: 'fixed' as const,
+        left: `${pos.x}px`,
+        top: `${pos.y}px`,
+        width: `${currentW}px`,
+        height: `${currentH}px`,
+        zIndex: 90,
+      }
+    : {};
+
   return (
-    <Card className="relative aspect-video w-full overflow-hidden rounded-xl border border-white/15 bg-slate-950 shadow-2xl backdrop-blur-xl">
+    <Card
+      style={mainCardStyle}
+      className={`relative overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-2xl backdrop-blur-xl transition-shadow ${
+        isFloating
+          ? 'cursor-grab active:cursor-grabbing border-[#ff9933]/50 ring-2 ring-[#ff9933]/20 shadow-[0_15px_40px_rgba(0,0,0,0.9)]'
+          : 'h-full w-full'
+      }`}
+    >
+      {/* Top Header Controls (Drag Bar & Float Toggle) */}
+      <div
+        className="absolute top-0 inset-x-0 h-9 bg-gradient-to-b from-slate-950/90 to-transparent z-30 flex items-center justify-between px-2.5 select-none"
+        onMouseDown={(e) => handleStartDrag(e.clientX, e.clientY)}
+        onTouchStart={(e) => {
+          if (e.touches.length > 0) handleStartDrag(e.touches[0].clientX, e.touches[0].clientY);
+        }}
+      >
+        {/* Name & Hand Badge */}
+        <div className="flex items-center gap-1.5 truncate">
+          {isFloating && <GripVertical className="h-3.5 w-3.5 text-slate-400 cursor-grab active:cursor-grabbing flex-shrink-0" />}
+          <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isCameraOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+          <span className="text-[11px] font-bold text-white truncate max-w-[110px]">{displayName} {isLocalUser ? '(You)' : ''}</span>
+          {roomUser?.isHandRaised && (
+            <span className="bg-[#FF9933] text-slate-950 font-extrabold text-[10px] px-1.5 py-0.5 rounded-full animate-bounce">
+              ✋
+            </span>
+          )}
+        </div>
+
+        {/* Float & Resize Controls */}
+        <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+          {/* Size Cycle Button */}
+          {isFloating && (
+            <button
+              onClick={cycleScale}
+              className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-200 border border-white/15 uppercase tracking-wider"
+              title="Change Box Size (Small/Medium/Large/XL)"
+            >
+              {cardScale}
+            </button>
+          )}
+
+          {/* Toggle Float vs Docked mode */}
+          <button
+            onClick={() => setIsFloating((f) => !f)}
+            className={`h-6 px-1.5 rounded-full text-[10px] font-bold border transition-all flex items-center gap-1 ${
+              isFloating
+                ? 'bg-[#ff9933]/20 text-[#ff9933] border-[#ff9933]/50'
+                : 'bg-white/10 text-slate-300 border-white/15 hover:bg-white/20'
+            }`}
+            title={isFloating ? 'Dock to Sidebar' : 'Float Anywhere'}
+          >
+            <Move className="h-3 w-3" />
+            <span className="hidden sm:inline">{isFloating ? 'Floating' : 'Float'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Video Element */}
       <video
         ref={videoRef}
@@ -279,86 +436,85 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
       {/* Camera Off Avatar View */}
       {(!isCameraOn || hasCameraPermission === false) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-[#061126] to-slate-950 p-4 text-center">
-          <Avatar className="h-20 w-20 border-2 border-[#FF9933]/50 shadow-lg mb-3">
+          <Avatar className="h-16 w-16 border-2 border-[#FF9933]/50 shadow-lg mb-2">
             <AvatarImage src={roomUser?.photoURL || ''} />
-            <AvatarFallback className="bg-[#FF9933]/20 text-[#FF9933] font-bold text-2xl">
+            <AvatarFallback className="bg-[#FF9933]/20 text-[#FF9933] font-bold text-xl">
               {displayName.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <p className="text-sm font-bold text-white mb-1">{displayName} {isLocalUser ? '(You)' : ''}</p>
-          <span className="text-xs text-slate-400 font-medium flex items-center gap-1.5 bg-white/5 px-2.5 py-1 rounded-full border border-white/10">
-            <VideoOff className="h-3.5 w-3.5 text-slate-400" /> Camera Off
+          <p className="text-xs font-bold text-white mb-0.5">{displayName} {isLocalUser ? '(You)' : ''}</p>
+          <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+            <VideoOff className="h-3 w-3 text-slate-400" /> Camera Off
           </span>
         </div>
       )}
 
       {/* Permission Request Dialog */}
       {hasCameraPermission === false && isLocalUser && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-4 text-center z-20 backdrop-blur-md">
-          <Alert className="max-w-[85%] border-[#FF9933]/40 bg-[#061126]/95 text-white">
-            <Camera className="h-5 w-5 text-[#FF9933]" />
-            <AlertTitle className="text-white font-bold text-base">Enable Camera Permission</AlertTitle>
-            <AlertDescription className="space-y-3 mt-2">
-              <span className="block text-slate-300 text-xs">
-                Your browser requires camera permission to start video. Please click "Allow" near your browser URL bar.
+        <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-3 text-center z-20 backdrop-blur-md">
+          <Alert className="max-w-[90%] border-[#FF9933]/40 bg-[#061126]/95 text-white p-3">
+            <Camera className="h-4 w-4 text-[#FF9933]" />
+            <AlertTitle className="text-white font-bold text-sm">Enable Camera</AlertTitle>
+            <AlertDescription className="space-y-2 mt-1">
+              <span className="block text-slate-300 text-[11px]">
+                Please allow camera permissions in your browser URL bar.
               </span>
               <Button
                 type="button"
                 size="sm"
                 onClick={requestMedia}
                 disabled={isRequesting}
-                className="bg-gradient-to-r from-[#FF9933] via-white to-[#138808] text-slate-950 font-extrabold hover:scale-105 transition-transform"
+                className="h-7 text-xs bg-gradient-to-r from-[#FF9933] via-white to-[#138808] text-slate-950 font-extrabold"
               >
-                {isRequesting ? <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
-                Turn On Camera
+                {isRequesting ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : null}
+                Turn On
               </Button>
             </AlertDescription>
           </Alert>
         </div>
       )}
 
-      {/* Controls Overlay */}
-      <div className="absolute bottom-3 right-3 flex gap-2 z-30">
+      {/* Controls Overlay (Mic & Camera Toggle) */}
+      <div className="absolute bottom-2.5 right-2.5 flex gap-1.5 z-30">
         {isLocalUser && (
           <>
             <Button
               variant="secondary"
               size="icon"
-              className={`h-9 w-9 rounded-full border border-white/20 transition-all ${
-                isMicOn ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-red-600 text-white hover:bg-red-700'
+              className={`h-7 w-7 rounded-full border border-white/20 transition-all ${
+                isMicOn ? 'bg-slate-800/90 text-white hover:bg-slate-700' : 'bg-red-600/90 text-white hover:bg-red-700'
               }`}
               onClick={toggleMic}
-              title={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
+              title={isMicOn ? 'Mute Mic' : 'Unmute Mic'}
             >
-              {isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+              {isMicOn ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
             </Button>
             <Button
               variant="secondary"
               size="icon"
-              className={`h-9 w-9 rounded-full border border-white/20 transition-all ${
-                isCameraOn ? 'bg-[#138808] text-white hover:bg-[#0f6e06]' : 'bg-red-600 text-white hover:bg-red-700'
+              className={`h-7 w-7 rounded-full border border-white/20 transition-all ${
+                isCameraOn ? 'bg-[#138808]/90 text-white hover:bg-[#0f6e06]' : 'bg-red-600/90 text-white hover:bg-red-700'
               }`}
               onClick={toggleCamera}
               title={isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
             >
-              {isCameraOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
+              {isCameraOn ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
             </Button>
           </>
         )}
       </div>
 
-      {/* Name & Hand Badge */}
-      <div className="absolute top-3 left-3 flex items-center gap-2 z-30">
-        <div className="bg-slate-900/80 backdrop-blur-md text-white text-xs font-semibold px-3 py-1 rounded-full border border-white/15 flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${isCameraOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-          {displayName} {isLocalUser ? '(You)' : ''}
+      {/* Interactive Corner Resize Handle (when floating) */}
+      {isFloating && (
+        <div
+          onMouseDown={handleStartResize}
+          onTouchStart={handleStartResize}
+          className="absolute bottom-0 right-0 h-4 w-4 cursor-se-resize flex items-center justify-center z-40 text-slate-400 hover:text-white group/resize"
+          title="Drag corner to resize video box"
+        >
+          <MoveDiagonal className="h-3 w-3 text-slate-400 group-hover/resize:text-[#ff9933] transition-colors" />
         </div>
-        {roomUser?.isHandRaised && (
-          <div className="bg-[#FF9933] text-slate-950 font-bold text-xs px-2.5 py-1 rounded-full border border-[#FF9933] shadow-[0_0_12px_rgba(255,153,51,0.6)] animate-bounce flex items-center gap-1">
-            ✋ Hand Raised
-          </div>
-        )}
-      </div>
+      )}
     </Card>
   );
 }

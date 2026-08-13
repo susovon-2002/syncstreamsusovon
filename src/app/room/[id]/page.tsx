@@ -318,24 +318,31 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </div>
       </Header>
 
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_450px] gap-4 p-4 overflow-hidden">
-        <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-4">
+      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_450px] gap-3 p-3 overflow-hidden">
+        <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-3">
           <VideoPlayer roomId={id} />
         </div>
-        <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-4 overflow-y-auto">
+        <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-3 overflow-hidden">
+          {/* Active User Webcams Strip */}
           {videoParticipants && videoParticipants.length > 0 && (
-            <div className="grid grid-cols-1 gap-4">
-              {videoParticipants.map(p => (
-                <UserVideo
-                  key={p.id || p.uid}
-                  user={p}
-                  roomId={id}
-                  isLocalUser={user ? (p.uid === user.uid || p.id === user.uid) : false}
-                />
-              ))}
+            <div className="flex-shrink-0 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
+              <div className={`grid gap-2 ${videoParticipants.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {videoParticipants.map(p => (
+                  <div key={p.id || p.uid} className="h-36">
+                    <UserVideo
+                      user={p}
+                      roomId={id}
+                      isLocalUser={user ? (p.uid === user.uid || p.id === user.uid) : false}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-          <ChatPanel roomId={id} />
+          {/* Main Live Chat Panel - Fills remaining height */}
+          <div className="flex-1 min-h-0 flex flex-col">
+            <ChatPanel roomId={id} />
+          </div>
         </div>
       </main>
 
