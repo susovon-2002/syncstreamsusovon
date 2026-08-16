@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { LogOut, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { doc, collection, addDoc, deleteDoc, updateDoc, deleteField } from 'firebase/firestore';
+import { doc, collection, addDoc, setDoc, deleteDoc, updateDoc, deleteField } from 'firebase/firestore';
 import { useFirebase } from '@/firebase';
 import { setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 
@@ -52,6 +52,12 @@ export function LeaveMeetingModal({
 
     try {
       if (firestore && roomId && user) {
+        // 0. Stop local media tracks & WebRTC connections
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('syncstream:stop-local-media'));
+          sessionStorage.setItem(`syncstream_left_room_${roomId}`, 'true');
+        }
+
         // 1. Record leave log in Firestore
         const logsRef = collection(firestore, 'rooms', roomId, 'leaveLogs');
         await addDoc(logsRef, {
@@ -65,10 +71,12 @@ export function LeaveMeetingModal({
 
         // 2. Mark presence as left and delete document from roomUsers collection
         const presenceRef = doc(firestore, 'rooms', roomId, 'roomUsers', user.uid);
-        await updateDoc(presenceRef, { isLeft: true, isOnline: false, isCameraOn: false }).catch(() => {});
+        await setDoc(presenceRef, { isLeft: true, isOnline: false, isCameraOn: false }, { merge: true }).catch(() => {});
         await deleteDoc(presenceRef).catch(() => {});
 
-        // 3. Remove user from room members map
+        // 3. Remove user from room members map and set joinRequest status to left
+        const reqRef = doc(firestore, 'rooms', roomId, 'joinRequests', user.uid);
+        await setDoc(reqRef, { status: 'left' }, { merge: true }).catch(() => {});
         const roomRef = doc(firestore, 'rooms', roomId);
         await updateDoc(roomRef, {
           [`members.${user.uid}`]: deleteField(),
@@ -79,7 +87,7 @@ export function LeaveMeetingModal({
     } finally {
       setIsSubmitting(false);
       onOpenChange(false);
-      router.push('/');
+      router.replace('/');
     }
   };
 

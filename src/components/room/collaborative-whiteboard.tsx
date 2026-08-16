@@ -225,10 +225,12 @@ export function CollaborativeWhiteboard({ roomId }: { roomId: string }) {
       <DialogTrigger asChild>
         <Button
           variant="outline"
-          className="h-10 w-full justify-start gap-2 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 text-xs font-bold shadow"
+          size="sm"
+          className="w-full h-8 px-1.5 text-[11px] font-extrabold border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 gap-1 shadow-sm rounded-lg justify-center flex items-center min-w-0"
+          title="Collaborative Live Whiteboard"
         >
-          <Pencil className="h-4 w-4 text-amber-400" />
-          <span>Live Whiteboard</span>
+          <Pencil className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+          <span className="truncate">Whiteboard</span>
         </Button>
       </DialogTrigger>
 

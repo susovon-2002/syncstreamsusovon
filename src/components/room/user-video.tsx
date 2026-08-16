@@ -7,7 +7,8 @@ import { Button } from '../ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { useFirebase } from '@/firebase';
+import { useFirebase, useDoc } from '@/firebase';
+import { useMemoFirebase } from '@/firebase/provider';
 import { doc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import { setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 
@@ -40,6 +41,15 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
   const effectiveRoomId = propRoomId || roomUser?.roomId;
   const displayName = roomUser?.displayName || 'User';
 
+  const roomRef = useMemoFirebase(
+    () => (firestore && effectiveRoomId ? doc(firestore, 'rooms', effectiveRoomId) : null),
+    [firestore, effectiveRoomId]
+  );
+  const { data: roomState } = useDoc(roomRef);
+
+  const isCameraBlocked = !!roomUser?.cameraBlocked || (!isLocalUser ? false : !!roomState?.allCamerasBlocked);
+  const isMicBlocked = !!roomUser?.micBlocked || (!isLocalUser ? false : !!roomState?.allMicsBlocked);
+
   const requestMedia = async () => {
     setIsRequesting(true);
     try {
@@ -61,14 +71,17 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
       }
 
       mediaStream.getVideoTracks().forEach((track) => {
-        track.enabled = true;
+        track.enabled = !isCameraBlocked;
+      });
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.enabled = !isMicBlocked;
       });
 
       setStream(mediaStream);
       setHasCameraPermission(true);
-      const hasVideo = mediaStream.getVideoTracks().length > 0;
+      const hasVideo = mediaStream.getVideoTracks().length > 0 && !isCameraBlocked;
       setIsCameraOn(hasVideo);
-      setIsMicOn(mediaStream.getAudioTracks().length > 0);
+      setIsMicOn(mediaStream.getAudioTracks().length > 0 && !isMicBlocked);
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -77,7 +90,7 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
 
       if (firestore && currentUser && effectiveRoomId) {
         const userRef = doc(firestore, 'rooms', effectiveRoomId, 'roomUsers', currentUser.uid);
-        setDocumentNonBlocking(userRef, { isCameraOn: true }, { merge: true });
+        setDocumentNonBlocking(userRef, { isCameraOn: hasVideo, isMicOn: !isMicBlocked }, { merge: true });
       }
     } catch (error: any) {
       console.error('Error accessing camera/microphone:', error);
@@ -102,6 +115,17 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
     };
   }, [isLocalUser]);
 
+  useEffect(() => {
+    const handleStopAllMedia = () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        setStream(null);
+      }
+    };
+    window.addEventListener('syncstream:stop-local-media', handleStopAllMedia);
+    return () => window.removeEventListener('syncstream:stop-local-media', handleStopAllMedia);
+  }, []);
+
   // Stream binding to video element
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -113,33 +137,67 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
     }
   }, [stream, isCameraOn]);
 
-  // 2. WebRTC Signaling Logic (Safeguarded against invalid SDP / ICE candidates)
+  useEffect(() => {
+    if (!isLocalUser || !stream || !firestore || !currentUser || !effectiveRoomId) return;
+
+    const nextCameraOn = !isCameraBlocked && stream.getVideoTracks().length > 0;
+    const nextMicOn = !isMicBlocked && stream.getAudioTracks().length > 0;
+
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = nextCameraOn;
+    });
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = nextMicOn;
+    });
+
+    setIsCameraOn(nextCameraOn);
+    setIsMicOn(nextMicOn);
+
+    const userRef = doc(firestore, 'rooms', effectiveRoomId, 'roomUsers', currentUser.uid);
+    setDocumentNonBlocking(userRef, { isCameraOn: nextCameraOn, isMicOn: nextMicOn }, { merge: true });
+  }, [isCameraBlocked, isMicBlocked, isLocalUser, stream, firestore, currentUser, effectiveRoomId]);
+
+  const streamRef = useRef<MediaStream | null>(null);
+  useEffect(() => {
+    streamRef.current = stream;
+  }, [stream]);
+
+  // 2. WebRTC Signaling Logic (Bulletproof 2-way webcam video stream negotiation)
   useEffect(() => {
     if (!firestore || !currentUser || !effectiveRoomId || !targetUid) return;
 
     if (isLocalUser) {
-      // Broadcaster: Listen for incoming connection offers from remote peers
+      // Broadcaster (Local User): Listen for incoming connection offers from remote peers
       const signalsRef = collection(firestore, 'rooms', effectiveRoomId, 'roomUsers', currentUser.uid, 'signals');
       const unsubscribe = onSnapshot(signalsRef, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            const fromUid = change.doc.id;
+          const data = change.doc.data();
+          const fromUid = change.doc.id;
 
-            if (data?.offer && data.offer.sdp && typeof data.offer.sdp === 'string' && !data.answer) {
+          if (change.type === 'added' || change.type === 'modified') {
+            if (data?.offer && !data.answer) {
               try {
+                if (peerConnections.current[fromUid]) {
+                  peerConnections.current[fromUid].close();
+                }
+
                 const pc = new RTCPeerConnection(ICE_SERVERS);
                 peerConnections.current[fromUid] = pc;
+                (pc as any).candidateQueue = [];
 
-                if (stream) {
-                  stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+                // Attach local tracks if available
+                const currentStream = streamRef.current;
+                if (currentStream) {
+                  currentStream.getTracks().forEach((track) => pc.addTrack(track, currentStream));
                 }
 
                 pc.onicecandidate = (event) => {
-                  if (event.candidate && event.candidate.candidate) {
+                  if (event.candidate) {
                     updateDoc(change.doc.ref, {
                       answerCandidates: arrayUnion(event.candidate.toJSON()),
-                    }).catch(console.warn);
+                    }).catch(() => {
+                      setDoc(change.doc.ref, { answerCandidates: [event.candidate!.toJSON()] }, { merge: true });
+                    });
                   }
                 };
 
@@ -147,9 +205,37 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
 
-                updateDoc(change.doc.ref, { answer: { type: answer.type, sdp: answer.sdp } }).catch(console.warn);
+                await updateDoc(change.doc.ref, { answer: { type: answer.type, sdp: answer.sdp } });
+
+                // Process queued offer candidates
+                const q = (pc as any).candidateQueue || [];
+                for (const c of q) {
+                  await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+                }
+                (pc as any).candidateQueue = [];
+
+                if (Array.isArray(data.offerCandidates)) {
+                  data.offerCandidates.forEach((c: any) => {
+                    pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+                  });
+                }
               } catch (err) {
                 console.warn('Error establishing remote peer answer:', err);
+              }
+            } else if (data?.offer && data.answer) {
+              const pc = peerConnections.current[fromUid];
+              if (pc) {
+                if (pc.remoteDescription) {
+                  if (Array.isArray(data.offerCandidates)) {
+                    data.offerCandidates.forEach((c: any) => {
+                      pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+                    });
+                  }
+                } else {
+                  if (Array.isArray(data.offerCandidates)) {
+                    (pc as any).candidateQueue = [...((pc as any).candidateQueue || []), ...data.offerCandidates];
+                  }
+                }
               }
             }
           }
@@ -157,95 +243,135 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
       });
       return () => unsubscribe();
     } else {
-      // Receiver: Initiate WebRTC connection to remote participant
+      // Receiver (Remote User Card): Initiate WebRTC connection to remote participant
       if (!roomUser?.isCameraOn) return;
 
-      const initPC = async () => {
+      let activePC: RTCPeerConnection | null = null;
+      let unsubSignalDoc: (() => void) | null = null;
+      let isRemoteDescSet = false;
+      const pendingCandidates: any[] = [];
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      activePC = pc;
+      peerConnections.current[targetUid] = pc;
+      const remoteStream = new MediaStream();
+
+      // Declare transceivers & add local tracks if available for 2-way call
+      try {
+        const currentStream = streamRef.current;
+        if (currentStream && currentStream.getTracks().length > 0) {
+          currentStream.getTracks().forEach((t) => pc.addTrack(t, currentStream));
+        } else {
+          pc.addTransceiver('video', { direction: 'recvonly' });
+          pc.addTransceiver('audio', { direction: 'recvonly' });
+        }
+      } catch (err) {
+        console.warn('Failed to setup transceivers or tracks:', err);
+      }
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+        } else if (event.track) {
+          remoteStream.addTrack(event.track);
+        }
+        if (videoRef.current) {
+          videoRef.current.srcObject = remoteStream;
+          videoRef.current.play().catch(console.warn);
+        }
+      };
+
+      const signalDoc = doc(firestore, 'rooms', effectiveRoomId, 'roomUsers', targetUid, 'signals', currentUser.uid);
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          updateDoc(signalDoc, {
+            offerCandidates: arrayUnion(event.candidate.toJSON()),
+          }).catch(() => {
+            setDoc(signalDoc, { offerCandidates: [event.candidate!.toJSON()] }, { merge: true });
+          });
+        }
+      };
+
+      const setupWebRTCConnection = async () => {
         try {
-          const pc = new RTCPeerConnection(ICE_SERVERS);
-          peerConnections.current[targetUid] = pc;
-
-          const remoteStream = new MediaStream();
-          pc.ontrack = (event) => {
-            if (event.streams && event.streams[0]) {
-              event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
-            } else if (event.track) {
-              remoteStream.addTrack(event.track);
-            }
-            if (videoRef.current) {
-              videoRef.current.srcObject = remoteStream;
-              videoRef.current.play().catch(console.warn);
-            }
-          };
-
-          const signalDoc = doc(firestore, 'rooms', effectiveRoomId, 'roomUsers', targetUid, 'signals', currentUser.uid);
-
-          pc.onicecandidate = (event) => {
-            const candidate = event.candidate;
-            if (candidate && candidate.candidate) {
-              updateDoc(signalDoc, {
-                offerCandidates: arrayUnion(candidate.toJSON()),
-              }).catch(() => {
-                setDoc(signalDoc, { offerCandidates: [candidate.toJSON()] }, { merge: true });
-              });
-            }
-          };
-
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           await setDoc(signalDoc, { offer: { type: offer.type, sdp: offer.sdp }, joinedAt: serverTimestamp() });
 
-          const unsubscribe = onSnapshot(signalDoc, (docSnap) => {
+          unsubSignalDoc = onSnapshot(signalDoc, async (docSnap) => {
             const data = docSnap.data();
-            if (data?.answer && data.answer.sdp && typeof data.answer.sdp === 'string' && !pc.currentRemoteDescription) {
+            if (data?.answer && !pc.currentRemoteDescription) {
               try {
-                pc.setRemoteDescription(new RTCSessionDescription(data.answer)).catch(console.warn);
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                isRemoteDescSet = true;
+                for (const c of pendingCandidates) {
+                  await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+                }
+                pendingCandidates.length = 0;
               } catch (e) {
                 console.warn('Failed to set remote description answer:', e);
               }
             }
             if (Array.isArray(data?.answerCandidates)) {
               data.answerCandidates.forEach((c: any) => {
-                if (c && (c.candidate || c.sdpMid !== undefined)) {
-                  try {
-                    pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.warn);
-                  } catch (e) {
-                    console.warn('Failed adding ICE candidate:', e);
-                  }
+                if (isRemoteDescSet) {
+                  pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+                } else {
+                  pendingCandidates.push(c);
                 }
               });
             }
           });
-
-          return () => {
-            unsubscribe();
-            deleteDoc(signalDoc).catch(console.warn);
-          };
         } catch (err) {
-          console.warn('Error in WebRTC receiver initPC:', err);
+          console.warn('Error in WebRTC receiver setup:', err);
         }
       };
 
-      const cleanup = initPC();
+      setupWebRTCConnection();
+
       return () => {
-        cleanup.then((c) => c && c());
+        if (unsubSignalDoc) unsubSignalDoc();
+        if (activePC) {
+          activePC.close();
+        }
+        deleteDoc(signalDoc).catch(() => {});
         if (peerConnections.current[targetUid]) {
-          peerConnections.current[targetUid].close();
           delete peerConnections.current[targetUid];
         }
       };
     }
-  }, [firestore, currentUser, roomUser?.isCameraOn, stream, effectiveRoomId, targetUid, isLocalUser]);
+  }, [firestore, currentUser, roomUser?.isCameraOn, effectiveRoomId, targetUid, isLocalUser]);
 
   const toggleMic = () => {
+    if (isMicBlocked) {
+      toast({
+        variant: 'destructive',
+        title: 'Microphone blocked',
+        description: 'The host has disabled your microphone for this room.',
+      });
+      return;
+    }
     if (stream) {
       const newState = !isMicOn;
       stream.getAudioTracks().forEach((t) => (t.enabled = newState));
       setIsMicOn(newState);
+      if (firestore && currentUser && effectiveRoomId) {
+        const userRef = doc(firestore, 'rooms', effectiveRoomId, 'roomUsers', currentUser.uid);
+        setDocumentNonBlocking(userRef, { isMicOn: newState }, { merge: true });
+      }
     }
   };
 
   const toggleCamera = () => {
+    if (isCameraBlocked) {
+      toast({
+        variant: 'destructive',
+        title: 'Camera blocked',
+        description: 'The host has disabled your camera for this room.',
+      });
+      return;
+    }
     if (!stream) {
       requestMedia();
       return;
@@ -485,6 +611,7 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
                 isMicOn ? 'bg-slate-800/90 text-white hover:bg-slate-700' : 'bg-red-600/90 text-white hover:bg-red-700'
               }`}
               onClick={toggleMic}
+              disabled={isMicBlocked}
               title={isMicOn ? 'Mute Mic' : 'Unmute Mic'}
             >
               {isMicOn ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
@@ -496,6 +623,7 @@ export function UserVideo({ user: roomUser, isLocalUser: propsIsLocalUser, roomI
                 isCameraOn ? 'bg-[#138808]/90 text-white hover:bg-[#0f6e06]' : 'bg-red-600/90 text-white hover:bg-red-700'
               }`}
               onClick={toggleCamera}
+              disabled={isCameraBlocked}
               title={isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
             >
               {isCameraOn ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}

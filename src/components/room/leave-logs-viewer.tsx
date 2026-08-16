@@ -80,10 +80,12 @@ export function LeaveLogsViewer({
       <DialogTrigger asChild>
         <Button
           variant="outline"
-          className="h-10 w-full justify-start gap-2 bg-gradient-to-r from-red-500/10 via-rose-500/10 to-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20 text-xs font-bold shadow"
+          size="sm"
+          className="w-full h-8 px-1.5 text-[11px] font-extrabold border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 gap-1 shadow-sm rounded-lg justify-center flex items-center min-w-0"
+          title="Room Leave Logs"
         >
-          <LogOut className="h-4 w-4 text-red-400" />
-          <span>Leave Logs</span>
+          <LogOut className="h-3.5 w-3.5 text-red-400 shrink-0" />
+          <span className="truncate">Leave Logs</span>
         </Button>
       </DialogTrigger>
 

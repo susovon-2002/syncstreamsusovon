@@ -10,14 +10,14 @@ import {
   Crown, Send, Video, VideoOff, Smile, Paperclip, Image as ImageIcon, 
   FileText, FileSpreadsheet, FileCode, FileArchive, File as FileIcon, 
   X, Download, ExternalLink, Loader2, ChevronLeft, ChevronRight, Eye, Plus, Sparkles,
-  Search, Trash2, Clock, Eye as EyeIcon, EyeOff, MoreVertical, Timer, Filter
+  Search, Trash2, Clock, Eye as EyeIcon, EyeOff, MoreVertical, Timer, Filter, Monitor, SlidersHorizontal
 } from 'lucide-react';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
 import { useFirebase } from '@/firebase';
 import { useCollection, useDoc } from '@/firebase';
 import { addDocumentNonBlocking, updateDocumentNonBlocking, setDocumentNonBlocking } from '@/firebase/non-blocking-updates';
-import { collection, query, orderBy, limit, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { collection, query, orderBy, limit, doc, setDoc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { useMemoFirebase } from '@/firebase/provider';
 import {
   DropdownMenu,
@@ -28,6 +28,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AttendanceExporter } from './attendance-exporter';
+import { ParticipantMediaManagerModal } from './participant-media-manager-modal';
 import { RoomPolls } from './room-polls';
 import { DJSoundboard } from './dj-soundboard';
 import { VoiceNoteRecorder } from './voice-note-recorder';
@@ -160,6 +161,7 @@ export function ChatPanel({ roomId }: { roomId: string }) {
   const [selectedDocument, setSelectedDocument] = useState<ChatAttachment | null>(null);
   const [docBlobUrl, setDocBlobUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
+  const [isMediaManagerOpen, setIsMediaManagerOpen] = useState(false);
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +177,8 @@ export function ChatPanel({ roomId }: { roomId: string }) {
   const { data: participants, isLoading: loadingParticipants } = useCollection(roomUsersRef);
 
   const isHost = user && room ? room.hostId === user.uid : false;
+  const allowParticipantScreenShare = room?.allowParticipantScreenShare !== false;
+  const canShareScreen = !!user && (isHost || allowParticipantScreenShare);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -465,6 +469,8 @@ export function ChatPanel({ roomId }: { roomId: string }) {
 
   const toggleCamera = async () => {
     if (!user || !firestore) return;
+    const currentUser = participants?.find(p => p.uid === user.uid || p.id === user.uid);
+    if (currentUser?.cameraBlocked) return;
     const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', user.uid);
     const newCameraState = !isCameraOn;
     setIsCameraOn(newCameraState);
@@ -498,13 +504,61 @@ export function ChatPanel({ roomId }: { roomId: string }) {
   };
 
   const handleRemoveParticipant = async (targetUid: string) => {
-    if (!firestore || !roomId || !isHost) return;
+    if (!firestore || !roomId || !isHost || !user) return;
+    const kickRef = doc(firestore, 'rooms', roomId, 'kickedUsers', targetUid);
+    await setDoc(kickRef, { kickedAt: new Date(), kickedBy: user.uid, reason: 'Kicked by room host' }, { merge: true }).catch(() => {});
+
+    const reqRef = doc(firestore, 'rooms', roomId, 'joinRequests', targetUid);
+    await setDoc(reqRef, { status: 'denied', kicked: true }, { merge: true }).catch(() => {});
+
     const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', targetUid);
+    await setDoc(userRef, { isKicked: true, isOnline: false, isCameraOn: false }, { merge: true }).catch(() => {});
     await deleteDoc(userRef).catch(() => {});
+
     if (roomRef) {
       await updateDoc(roomRef, {
         [`members.${targetUid}`]: deleteField(),
       }).catch(() => {});
+    }
+  };
+
+  const handleToggleUserCameraBlock = (targetUid: string, blocked: boolean) => {
+    if (!firestore || !isHost) return;
+    const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', targetUid);
+    setDocumentNonBlocking(userRef, blocked ? { cameraBlocked: true, isCameraOn: false } : { cameraBlocked: false }, { merge: true });
+  };
+
+  const handleToggleUserMicBlock = (targetUid: string, blocked: boolean) => {
+    if (!firestore || !isHost) return;
+    const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', targetUid);
+    setDocumentNonBlocking(userRef, blocked ? { micBlocked: true, isMicOn: false } : { micBlocked: false }, { merge: true });
+  };
+
+  const handleToggleAllCameras = (blocked: boolean) => {
+    if (!firestore || !isHost || !participants) return;
+    participants.forEach(p => {
+      const uId = p.uid || p.id;
+      if (uId && uId !== user?.uid) {
+        const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', uId);
+        setDocumentNonBlocking(userRef, blocked ? { cameraBlocked: true, isCameraOn: false } : { cameraBlocked: false }, { merge: true });
+      }
+    });
+    if (roomRef) {
+      setDocumentNonBlocking(roomRef, { allCamerasBlocked: blocked }, { merge: true });
+    }
+  };
+
+  const handleToggleAllMics = (blocked: boolean) => {
+    if (!firestore || !isHost || !participants) return;
+    participants.forEach(p => {
+      const uId = p.uid || p.id;
+      if (uId && uId !== user?.uid) {
+        const userRef = doc(firestore, 'rooms', roomId, 'roomUsers', uId);
+        setDocumentNonBlocking(userRef, blocked ? { micBlocked: true, isMicOn: false } : { micBlocked: false }, { merge: true });
+      }
+    });
+    if (roomRef) {
+      setDocumentNonBlocking(roomRef, { allMicsBlocked: blocked }, { merge: true });
     }
   };
 
@@ -628,15 +682,37 @@ export function ChatPanel({ roomId }: { roomId: string }) {
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto">
-            {isHost && participants && participants.some(p => p.isHandRaised) && (
+            {isHost && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleLowerAllHands}
-                className="h-7 px-2.5 text-[11px] font-bold border-[#FF9933]/40 text-[#FF9933] hover:bg-[#FF9933]/20"
+                onClick={() => setIsMediaManagerOpen(true)}
+                className="h-8 px-2.5 text-xs font-extrabold border-[#ff9933]/50 bg-[#ff9933]/15 text-[#ff9933] hover:bg-[#ff9933]/25 shadow-sm rounded-lg flex items-center gap-1.5"
               >
-                Lower All 🖐️
+                <SlidersHorizontal className="h-3.5 w-3.5 text-[#ff9933]" />
+                <span>Media Manager</span>
               </Button>
+            )}
+
+            {/* Screen Share Button */}
+            {canShareScreen && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => window.dispatchEvent(new Event('syncstream:start-screen-share'))}
+                      className="h-8 w-8 rounded-full border border-[#ff9933]/40 bg-[#ff9933]/10 text-[#ff9933] transition-all hover:bg-[#ff9933]/20 hover:text-[#ffb366] shadow-[0_0_10px_rgba(255,153,51,0.25)]"
+                    >
+                      <Monitor className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Share Screen</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
 
             {/* Raise Hand Button */}
@@ -724,6 +800,11 @@ export function ChatPanel({ roomId }: { roomId: string }) {
                         <Crown className="h-3 w-3 text-slate-950" />
                       </div>
                     )}
+                    {(p.cameraBlocked || p.micBlocked) && (
+                      <div className="absolute -bottom-1 -right-1 rounded-full bg-red-500 px-1 py-0.5 text-[8px] font-black text-white shadow z-10">
+                        {p.cameraBlocked && p.micBlocked ? 'A/V' : p.cameraBlocked ? 'CAM' : 'MIC'}
+                      </div>
+                    )}
                   </div>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="bg-slate-900 border-slate-700 text-white text-xs">
@@ -736,9 +817,23 @@ export function ChatPanel({ roomId }: { roomId: string }) {
                     </DropdownMenuItem>
                   )}
                   {isHost && !isCurrent && (
-                    <DropdownMenuItem onClick={() => handleRemoveParticipant(pId)} className="hover:bg-red-500/10 cursor-pointer text-red-400">
-                      Remove from Room ❌
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem
+                        onClick={() => handleToggleUserCameraBlock(pId, !p.cameraBlocked)}
+                        className="hover:bg-slate-800 cursor-pointer text-sky-400 font-bold"
+                      >
+                        {p.cameraBlocked ? 'Enable Camera 📹' : 'Block Camera 📹🚫'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handleToggleUserMicBlock(pId, !p.micBlocked)}
+                        className="hover:bg-slate-800 cursor-pointer text-amber-400 font-bold"
+                      >
+                        {p.micBlocked ? 'Unmute Mic 🎤' : 'Mute Mic 🎤🚫'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleRemoveParticipant(pId)} className="hover:bg-red-500/10 cursor-pointer text-red-400">
+                        Remove from Room ❌
+                      </DropdownMenuItem>
+                    </>
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1633,6 +1728,15 @@ export function ChatPanel({ roomId }: { roomId: string }) {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Participant Media Manager Modal */}
+      <ParticipantMediaManagerModal
+        open={isMediaManagerOpen}
+        onOpenChange={setIsMediaManagerOpen}
+        roomId={roomId}
+        participants={participants || []}
+        isHost={isHost}
+        roomState={room}
+      />
     </Card>
   );
 }

@@ -10,9 +10,10 @@ import { Film, Monitor, UploadCloud, Play } from 'lucide-react';
 
 interface AddMediaTabsProps {
   onUrlSelect: (url: string | MediaStream, title: string, source: 'youtube' | 'file' | 'screen') => void;
+  canUpload?: boolean;
 }
 
-export function AddMediaTabs({ onUrlSelect }: AddMediaTabsProps) {
+export function AddMediaTabs({ onUrlSelect, canUpload = true }: AddMediaTabsProps) {
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
@@ -80,7 +81,7 @@ export function AddMediaTabs({ onUrlSelect }: AddMediaTabsProps) {
       <div className="h-1.5 w-[calc(100%+3rem)] bg-gradient-to-r from-[#ff9933] via-white to-[#138808] -mt-6 -mx-6 mb-6" />
 
       <Tabs defaultValue="url" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 bg-slate-950/80 border border-white/10 p-1 rounded-xl h-12">
+        <TabsList className={`grid w-full bg-slate-950/80 border border-white/10 p-1 rounded-xl h-12 ${canUpload ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <TabsTrigger 
             value="url" 
             className="flex items-center justify-center gap-2 rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#ff9933] data-[state=active]:to-[#ff7700] data-[state=active]:text-slate-950 data-[state=active]:font-extrabold text-slate-300 transition-all text-xs sm:text-sm"
@@ -95,13 +96,15 @@ export function AddMediaTabs({ onUrlSelect }: AddMediaTabsProps) {
             <Monitor className="h-4 w-4" />
             <span>Share Screen</span>
           </TabsTrigger>
-          <TabsTrigger 
-            value="upload"
-            className="flex items-center justify-center gap-2 rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#ff9933] data-[state=active]:to-[#ff7700] data-[state=active]:text-slate-950 data-[state=active]:font-extrabold text-slate-300 transition-all text-xs sm:text-sm"
-          >
-            <UploadCloud className="h-4 w-4" />
-            <span>Upload File</span>
-          </TabsTrigger>
+          {canUpload && (
+            <TabsTrigger 
+              value="upload"
+              className="flex items-center justify-center gap-2 rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#ff9933] data-[state=active]:to-[#ff7700] data-[state=active]:text-slate-950 data-[state=active]:font-extrabold text-slate-300 transition-all text-xs sm:text-sm"
+            >
+              <UploadCloud className="h-4 w-4" />
+              <span>Upload File</span>
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="url" className="mt-4">
